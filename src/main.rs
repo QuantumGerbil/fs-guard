@@ -1,37 +1,68 @@
 mod sha256;
 mod merkle;
 
-fn main() {
-    let data = "hello world";
-    let hash = sha256::sha256(data.as_bytes());
-    // Convert the byte array to a hexadecimal string
-    let hex_output = bytes_to_hex(&hash);
+use crate::sha256::bytes_to_hex;
+struct Sha256Hasher;
+use std::env;
+use std::fs;
+use std::io::{self, Read};
 
-    println!("SHA-256 Hex: {}", hex_output);
-    println!("SHA-256: {:?}", hash);
-    
+impl crate::merkle::HashFunction for Sha256Hasher {
+    fn hash(&self, input: &[u8]) -> Vec<u8> {
+        crate::sha256::sha256(input).to_vec()
+    }
+}
+
+fn main() -> io::Result<()> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        eprintln!("Usage: {} <file_or_directory>", args[0]);
+        return Ok(());
+    }
+
+    let path = &args[1];
+    let metadata = fs::metadata(path)?;
+
+    let mut data_blocks = Vec::new();
+
+    if metadata.is_file() {
+        // Read the file content
+        let mut file = fs::File::open(path)?;
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+        data_blocks.push(buffer);
+    } else if metadata.is_dir() {
+        // Read each file in the directory
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let mut file = fs::File::open(path)?;
+                let mut buffer = Vec::new();
+                file.read_to_end(&mut buffer)?;
+                data_blocks.push(buffer);
+            }
+        }
+    } else {
+        eprintln!("Invalid path: {}", path);
+        return Ok(());
+    }
+
     // Create a new Merkle Tree with the SHA-256 hasher
-    let mut merkle_tree = merkle::MerkleTree::new(Sha256Hasher);
+    let mut merkle_tree = crate::merkle::MerkleTree::new(Sha256Hasher);
 
-    // Data blocks to be included in the Merkle Tree
-    let data_blocks: Vec<&[u8]> = vec![b"block1", b"block2", b"block3", b"block4"];
+    // Convert data_blocks to slices
+    let data_slices: Vec<&[u8]> = data_blocks.iter().map(|block| block.as_slice()).collect();
 
     // Build the Merkle Tree
-    merkle_tree.build(data_blocks);
+    merkle_tree.build(data_slices);
 
     // Get the Merkle root
     if let Some(root_hash) = merkle_tree.root_hash() {
         println!("Merkle Root: {:?}", bytes_to_hex(root_hash));
-
-        // Generate a proof for the first leaf
-        if let Some(proof) = merkle_tree.generate_proof(0) {
-            println!("Proof for first leaf: {:?}", proof.iter().map(|h| bytes_to_hex(h)).collect::<Vec<_>>());
-
-            // Verify the proof
-            let is_valid = merkle_tree.verify_proof(b"block1", proof, root_hash);
-            println!("Proof is valid: {}", is_valid);
-        }
     } else {
         println!("Merkle Tree is empty.");
     }
+
+    Ok(())
 }

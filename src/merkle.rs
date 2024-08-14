@@ -69,13 +69,100 @@ impl<H: HashFunction> MerkleTree<H> {
     pub fn root_hash(&self) -> Option<&[u8]> {
         self.root.as_ref().map(|node| node.hash.as_slice())
     }
+
+    /// Generate a Merkle proof for the leaf at the given index.
+    pub fn generate_proof(&self, index: usize) -> Option<Vec<Vec<u8>>> {
+        let mut proof = Vec::new();
+        let mut current_index = index;
+        let mut current_level = self.leaves();
+
+        while current_level.len() > 1 {
+            let sibling_index = if current_index % 2 == 0 {
+                current_index + 1
+            } else {
+                current_index - 1
+            };
+
+            if sibling_index < current_level.len() {
+                proof.push(current_level[sibling_index].hash.clone());
+            }
+
+            current_index /= 2;
+            current_level = self.next_level(&current_level);
+        }
+
+        Some(proof)
+    }
+
+    /// Verify a Merkle proof for a given leaf and root hash.
+    pub fn verify_proof(&self, leaf: &[u8], proof: Vec<Vec<u8>>, root_hash: &[u8]) -> bool {
+        let mut current_hash = self.hasher.hash(leaf);
+
+        for sibling_hash in proof {
+            let combined_hash = if current_hash < sibling_hash {
+                [current_hash, sibling_hash].concat()
+            } else {
+                [sibling_hash, current_hash].concat()
+            };
+            current_hash = self.hasher.hash(&combined_hash);
+        }
+
+        current_hash == root_hash
+    }
+
+    /// Retrieve the leaf nodes of the Merkle tree.
+    fn leaves(&self) -> Vec<MerkleNode> {
+        let mut leaves = Vec::new();
+        if let Some(root) = &self.root {
+            self.collect_leaves(root, &mut leaves);
+        }
+        leaves
+    }
+
+    /// Helper method to recursively collect leaves from the tree.
+    fn collect_leaves(&self, node: &MerkleNode, leaves: &mut Vec<MerkleNode>) {
+        if node.left.is_none() && node.right.is_none() {
+            leaves.push(node.clone());
+        } else {
+            if let Some(left) = &node.left {
+                self.collect_leaves(left, leaves);
+            }
+            if let Some(right) = &node.right {
+                self.collect_leaves(right, leaves);
+            }
+        }
+    }
+
+    /// Compute the next level of nodes from the current level.
+    fn next_level(&self, current_level: &[MerkleNode]) -> Vec<MerkleNode> {
+        let mut next_level = Vec::new();
+        for i in (0..current_level.len()).step_by(2) {
+            let left = &current_level[i];
+            let right = if i + 1 < current_level.len() {
+                &current_level[i + 1]
+            } else {
+                left // Duplicate last node if odd number
+            };
+
+            let combined_hash = [left.hash.clone(), right.hash.clone()].concat();
+            let parent_hash = self.hasher.hash(&combined_hash);
+
+            next_level.push(MerkleNode {
+                hash: parent_hash,
+                left: Some(Box::new(left.clone())),
+                right: Some(Box::new(right.clone())),
+            });
+        }
+        next_level
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::sha256::sha256;
     use crate::merkle::MerkleTree;
+    use crate::Sha256Hasher;
+    use crate::sha256;
     
         #[test]
     fn test_merkle_tree_single_block() {
