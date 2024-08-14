@@ -1,7 +1,8 @@
 mod sha256;
 mod merkle;
+mod utility;
 
-use crate::sha256::bytes_to_hex;
+use crate::utility::bytes_to_hex;
 struct Sha256Hasher;
 use std::env;
 use std::fs;
@@ -13,7 +14,7 @@ impl crate::merkle::HashFunction for Sha256Hasher {
     }
 }
 
-fn main() -> io::Result<()> {
+/*fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("Usage: {} <file_or_directory>", args[0]);
@@ -65,4 +66,59 @@ fn main() -> io::Result<()> {
     }
 
     Ok(())
+}*/
+
+fn main() {
+    // Create a new Merkle Tree with the SHA-256 hasher
+    let mut merkle_tree = merkle::MerkleTree::new(Sha256Hasher);
+
+    // Data blocks to be included in the Merkle Tree
+    let data_blocks: Vec<&[u8]> = vec![b"block1", b"block2", b"block3", b"block4"];
+
+    // Build the Merkle Tree
+    merkle_tree.build(data_blocks);
+
+    // Get the Merkle root
+    if let Some(root_hash) = merkle_tree.root_hash() {
+        #[cfg(debug_assertions)]
+        println!("Merkle Root: {:?}", bytes_to_hex(root_hash));
+
+        // Generate a proof for the first leaf
+        if let Some(proof) = merkle_tree.generate_proof(0) {
+            println!("Proof for first leaf: {:?}", proof.iter().map(|h| bytes_to_hex(h)).collect::<Vec<_>>());
+
+            // Verify the proof
+            let is_valid = merkle_tree.verify_proof(b"block1", proof, root_hash);
+            println!("Proof is valid: {}", is_valid);
+        }
+        
+        // Generate a proof for the second leaf
+        if let Some(proof) = merkle_tree.generate_proof(1) {
+            println!("Proof for second leaf: {:?}", proof.iter().map(|h| bytes_to_hex(h)).collect::<Vec<_>>());
+
+            // Verify the proof
+            let is_valid = merkle_tree.verify_proof(b"block2", proof, root_hash);
+            println!("Proof is valid: {}", is_valid);
+        }
+        
+        // Generate a proof for the third leaf
+        if let Some(proof) = merkle_tree.generate_proof(2) {
+            println!("Proof for third leaf: {:?}", proof.iter().map(|h| bytes_to_hex(h)).collect::<Vec<_>>());
+
+            // Verify the proof
+            let is_valid = merkle_tree.verify_proof(b"block3", proof, root_hash);
+            println!("Proof is valid: {}", is_valid);
+        }
+        
+        // Generate a proof for the first leaf
+        if let Some(proof) = merkle_tree.generate_proof(3) {
+            println!("Proof for fourth leaf: {:?}", proof.iter().map(|h| bytes_to_hex(h)).collect::<Vec<_>>());
+
+            // Verify the proof
+            let is_valid = merkle_tree.verify_proof(b"block4", proof, root_hash);
+            println!("Proof is valid: {}", is_valid);
+        }
+    } else {
+        println!("Merkle Tree is empty.");
+    }
 }
