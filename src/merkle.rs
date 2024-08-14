@@ -1,4 +1,6 @@
 use std::fmt::Debug;
+#[cfg(debug_assertions)]
+use crate::utility;
 
 /// Trait for hashing functions
 pub trait HashFunction {
@@ -19,17 +21,18 @@ pub struct MerkleNode {
 pub struct MerkleTree<H: HashFunction> {
     root: Option<MerkleNode>,
     hasher: H,
+    leaves: Vec<MerkleNode>,
 }
 
 impl<H: HashFunction> MerkleTree<H> {
     /// Create a new Merkle Tree with the given hasher
     pub fn new(hasher: H) -> Self {
-        MerkleTree { root: None, hasher }
+        MerkleTree { root: None, hasher, leaves: Vec::new() }
     }
 
     /// Build the Merkle Tree from a list of data blocks
     pub fn build(&mut self, data_blocks: Vec<&[u8]>) {
-        let mut nodes: Vec<MerkleNode> = data_blocks
+        self.leaves = data_blocks
             .into_iter()
             .map(|data| MerkleNode {
                 hash: self.hasher.hash(data),
@@ -37,6 +40,8 @@ impl<H: HashFunction> MerkleTree<H> {
                 right: None,
             })
             .collect();
+
+        let mut nodes = self.leaves.clone();
 
         while nodes.len() > 1 {
             let mut next_level = Vec::new();
@@ -48,8 +53,13 @@ impl<H: HashFunction> MerkleTree<H> {
                 } else {
                     Box::new(nodes[i].clone()) // Duplicate last node if odd number
                 };
-
-                let combined_hash = [left.hash.clone(), right.hash.clone()].concat();
+                
+                let combined_hash = if left.hash.clone() < right.hash.clone() {
+                    [left.hash.clone(), right.hash.clone()].concat()
+                } else {
+                    [right.hash.clone(), left.hash.clone()].concat()
+                };
+                //let combined_hash = [left.hash.clone(), right.hash.clone()].concat();
                 let parent_hash = self.hasher.hash(&combined_hash);
 
                 next_level.push(MerkleNode {
@@ -69,91 +79,122 @@ impl<H: HashFunction> MerkleTree<H> {
     pub fn root_hash(&self) -> Option<&[u8]> {
         self.root.as_ref().map(|node| node.hash.as_slice())
     }
-
-    /// Generate a Merkle proof for the leaf at the given index.
+    
+    /// Generate a proof for a given leaf index
     pub fn generate_proof(&self, index: usize) -> Option<Vec<Vec<u8>>> {
+        if index >= self.leaves.len() {
+            return None;
+        }
+
         let mut proof = Vec::new();
         let mut current_index = index;
-        let mut current_level = self.leaves();
+        let mut nodes = self.leaves.clone();
+        
+        // Print initial leaf hashes
+        #[cfg(debug_assertions)]
+        {
+            println!("Leaf hashes:");
+            for node in &nodes {
+                println!("{:?}", utility::bytes_to_hex(&node.hash));
+            }
+        }
 
-        while current_level.len() > 1 {
-            let sibling_index = if current_index % 2 == 0 {
-                current_index + 1
-            } else {
-                current_index - 1
-            };
+        while nodes.len() > 1 {
+            let mut next_level = Vec::new();
 
-            if sibling_index < current_level.len() {
-                proof.push(current_level[sibling_index].hash.clone());
+            for i in (0..nodes.len()).step_by(2) {
+                let left = &nodes[i];
+                let right = if i + 1 < nodes.len() {
+                    &nodes[i + 1]
+                } else {
+                    left
+                };
+                
+                // Print the hashes being combined
+                #[cfg(debug_assertions)]
+                println!("Combining hashes: {:?} and {:?}", utility::bytes_to_hex(&left.hash), utility::bytes_to_hex(&right.hash));
+
+                if i == current_index || i + 1 == current_index {
+                    if i == current_index {
+                        proof.push(right.hash.clone());
+                        #[cfg(debug_assertions)]
+                        println!("Adding to proof: {:?}", utility::bytes_to_hex(&right.hash));
+                    } else {
+                        proof.push(left.hash.clone());
+                        #[cfg(debug_assertions)]
+                        println!("Adding to proof: {:?}", utility::bytes_to_hex(&left.hash));
+                    }
+                    current_index /= 2;
+                }
+
+                let combined_hash = if left.hash.clone() < right.hash.clone() {
+                    [left.hash.clone(), right.hash.clone()].concat()
+                } else {
+                    [right.hash.clone(), left.hash.clone()].concat()
+                };
+                //let combined_hash = [left.hash.clone(), right.hash.clone()].concat();
+                let parent_hash = self.hasher.hash(&combined_hash);
+                
+                // Print the parent hash
+                #[cfg(debug_assertions)]
+                println!("Parent hash: {:?}", utility::bytes_to_hex(&parent_hash));
+
+                next_level.push(MerkleNode {
+                    hash: parent_hash,
+                    left: None,
+                    right: None,
+                });
             }
 
-            current_index /= 2;
-            current_level = self.next_level(&current_level);
+            nodes = next_level;
         }
 
         Some(proof)
     }
 
-    /// Verify a Merkle proof for a given leaf and root hash.
-    pub fn verify_proof(&self, leaf: &[u8], proof: Vec<Vec<u8>>, root_hash: &[u8]) -> bool {
-        let mut current_hash = self.hasher.hash(leaf);
+    /// Verify a proof for a given leaf and expected root
+    pub fn verify_proof(&self, leaf: &[u8], proof: Vec<Vec<u8>>, expected_root: &[u8]) -> bool {
+        let mut hash = self.hasher.hash(leaf);
+        #[cfg(debug_assertions)]
+        println!("Initial leaf hash: {:?}", utility::bytes_to_hex(&hash));
 
-        for sibling_hash in proof {
-            let combined_hash = if current_hash < sibling_hash {
-                [current_hash, sibling_hash].concat()
+        #[cfg(debug_assertions)]
+        {
+        for (i, sibling_hash) in proof.iter().enumerate() {
+        println!("Sibling hash {}: {:?}", i, utility::bytes_to_hex(sibling_hash));
+        
+            let combined_hash = if hash < *sibling_hash {
+                [hash.clone(), sibling_hash.clone()].concat()
             } else {
-                [sibling_hash, current_hash].concat()
+                [sibling_hash.clone(), hash.clone()].concat()
             };
-            current_hash = self.hasher.hash(&combined_hash);
+            //let combined_hash = [hash.clone(), sibling_hash.clone()].concat()
+            hash = self.hasher.hash(&combined_hash);
+            println!("Combined hash {}: {:?}", i, utility::bytes_to_hex(&hash));
         }
-
-        current_hash == root_hash
-    }
-
-    /// Retrieve the leaf nodes of the Merkle tree.
-    fn leaves(&self) -> Vec<MerkleNode> {
-        let mut leaves = Vec::new();
-        if let Some(root) = &self.root {
-            self.collect_leaves(root, &mut leaves);
         }
-        leaves
-    }
+        
+        #[cfg(not(debug_assertions))]
+        {
+        for sibling_hash in proof.iter() {
 
-    /// Helper method to recursively collect leaves from the tree.
-    fn collect_leaves(&self, node: &MerkleNode, leaves: &mut Vec<MerkleNode>) {
-        if node.left.is_none() && node.right.is_none() {
-            leaves.push(node.clone());
-        } else {
-            if let Some(left) = &node.left {
-                self.collect_leaves(left, leaves);
-            }
-            if let Some(right) = &node.right {
-                self.collect_leaves(right, leaves);
-            }
-        }
-    }
-
-    /// Compute the next level of nodes from the current level.
-    fn next_level(&self, current_level: &[MerkleNode]) -> Vec<MerkleNode> {
-        let mut next_level = Vec::new();
-        for i in (0..current_level.len()).step_by(2) {
-            let left = &current_level[i];
-            let right = if i + 1 < current_level.len() {
-                &current_level[i + 1]
+            let combined_hash = if hash < *sibling_hash {
+                [hash.clone(), sibling_hash.clone()].concat()
             } else {
-                left // Duplicate last node if odd number
+                [sibling_hash.clone(), hash.clone()].concat()
             };
-
-            let combined_hash = [left.hash.clone(), right.hash.clone()].concat();
-            let parent_hash = self.hasher.hash(&combined_hash);
-
-            next_level.push(MerkleNode {
-                hash: parent_hash,
-                left: Some(Box::new(left.clone())),
-                right: Some(Box::new(right.clone())),
-            });
+            //let combined_hash = [hash.clone(), sibling_hash.clone()].concat()
+            hash = self.hasher.hash(&combined_hash);
         }
-        next_level
+        }
+        
+        #[cfg(debug_assertions)]
+        {
+            println!("Final computed hash: {:?}", utility::bytes_to_hex(&hash));
+            println!("Expected root hash: {:?}", utility::bytes_to_hex(expected_root));
+        }
+
+        hash == expected_root
     }
 }
 
