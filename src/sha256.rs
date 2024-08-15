@@ -1,3 +1,5 @@
+#[cfg(target_arch = "x86_64")]
+use std::arch::x86_64::*;
 /// Computes the SHA-256 hash of the input data.
 /// 
 /// This function takes a byte slice as input, applies the SHA-256 hashing algorithm,
@@ -22,7 +24,7 @@ pub fn sha256(input: &[u8]) -> [u8; 32] {
 
     // Process each 512-bit block of the padded message
     for block in padded.chunks(64) {
-        compress(&mut h, block);
+            compress(&mut h, block);
     }
 
     // Convert the final hash values into a byte array
@@ -174,6 +176,7 @@ fn compress(hash_state: &mut [u32; 8], block: &[u8]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utility::bytes_to_hex;
     #[test]
     fn test_sha256_hello_world() {
         let input = b"hello world";

@@ -4,9 +4,6 @@ mod utility;
 
 use crate::utility::bytes_to_hex;
 struct Sha256Hasher;
-use std::env;
-use std::fs;
-use std::io::{self, Read};
 
 impl crate::merkle::HashFunction for Sha256Hasher {
     fn hash(&self, input: &[u8]) -> Vec<u8> {
