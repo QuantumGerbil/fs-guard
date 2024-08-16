@@ -79,13 +79,29 @@ fn pad_message(message: &[u8]) -> Vec<u8> {
 ///
 /// An array of 64 `u32` words used in the compression function.
 fn message_schedule(block: &[u8]) -> [u32; 64] {
-    let mut w = [0u32; 64];
-    
+    //let mut w = [0u32; 64];
+    // Use Arc and Mutex to allow safe concurrent mutation of the array
+    let w = Arc::new(Mutex::new([0u32; 64]));
+
     // Initialize the first 16 words
-    for i in 0..16 {
-        w[i] = u32::from_be_bytes([block[4 * i], block[4 * i + 1], block[4 * i + 2], block[4 * i + 3]]);
-    }
+    //for i in 0..16 {
+    //    //w[i] = u32::from_be_bytes([block[4 * i], block[4 * i + 1], block[4 * i + 2], block[4 * i + 3]]);
+    //    w[i] = (block[4 * i] as u32) << 24
+    //        | (block[4 * i + 1] as u32) << 16
+    //        | (block[4 * i + 2] as u32) << 8
+    //        | (block[4 * i + 3] as u32);
+    //}
+    (0..16).into_par_iter().for_each(|i| {
+        let mut w = w.lock().unwrap();
+        w[i] = (block[4 * i] as u32) << 24
+            | (block[4 * i + 1] as u32) << 16
+            | (block[4 * i + 2] as u32) << 8
+            | (block[4 * i + 3] as u32);
+    });
     
+    // Convert Arc<Mutex<[u32; 64]>> back to [u32; 64]
+    let mut w = Arc::try_unwrap(w).unwrap().into_inner().unwrap();
+
     // Compute the remaining words
     for i in 16..64 {
         let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -95,10 +111,9 @@ fn message_schedule(block: &[u8]) -> [u32; 64] {
             .wrapping_add(w[i - 7])
             .wrapping_add(s1);
     }
-    
+
     w
 }
-
 /// Performs the SHA-256 compression function on a single block.
 ///
 /// This function updates the hash values by processing a 512-bit block
